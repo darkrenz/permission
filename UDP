@@ -1,0 +1,102 @@
+#!/bin/bash
+
+CONFIG_FILE="/etc/zivpn/config.json"
+MAX_USERNAMES=7
+
+# Function to display the list of usernames
+display_usernames() {
+  echo "Usernames:"
+  echo "┌─────────────┐"
+  jq -r '.auth.config[]' "$CONFIG_FILE" | awk '{printf "│%12s │\n", $0}'
+  echo "└─────────────┘"
+}
+
+# Function to add a username to the JSON config file
+add_username() {
+  if [ $(jq '.auth.config | length' "$CONFIG_FILE") -ge $MAX_USERNAMES ]; then
+    echo "Maximum number of usernames ($MAX_USERNAMES) reached."
+  else
+    echo "Enter the username (max 7 characters):"
+    read -n 7 username
+
+    # Check if the username already exists in the config
+    if grep -q "\"$username\"" "$CONFIG_FILE"; then
+      echo "Username already exists."
+    else
+      jq --arg username "$username" '.auth.config += [$username]' "$CONFIG_FILE" > temp.json && mv temp.json "$CONFIG_FILE"
+      echo "Username added successfully."
+      display_usernames
+      systemctl restart zivpn.service
+    fi
+  fi
+}
+
+# Function to remove a username from the JSON config file
+remove_username() {
+  echo "Enter the username to remove (max 7 characters):"
+  read -n 7 username
+
+  # Check if the username exists in the config
+  if jq -e ".auth.config | index(\"$username\")" "$CONFIG_FILE" >/dev/null; then
+    jq --arg username "$username" '.auth.config -= [$username]' "$CONFIG_FILE" > temp.json && mv temp.json "$CONFIG_FILE"
+    echo "Username removed successfully."
+    display_usernames
+    systemctl restart zivpn.service
+  else
+    echo "Username not found."
+  fi
+}
+
+# Function to change a username in the JSON config file
+change_username() {
+  echo "Enter the username to change (max 7 characters):"
+  read -n 7 old_username
+
+  # Check if the old username exists in the config
+  if ! jq -e ".auth.config | index(\"$old_username\")" "$CONFIG_FILE" >/dev/null; then
+    echo "Username not found."
+  else
+    echo "Enter the new username (max 7 characters):"
+    read -n 7 new_username
+
+    # Check if the new username already exists in the config
+    if grep -q "\"$new_username\"" "$CONFIG_FILE"; then
+      echo "New username already exists."
+    else
+      jq --arg old_username "$old_username" --arg new_username "$new_username" '.auth.config |= map(if . == $old_username then $new_username else . end)' "$CONFIG_FILE" > temp.json && mv temp.json "$CONFIG_FILE"
+      echo "Username changed successfully."
+      display_usernames
+      systemctl restart zivpn.service
+    fi
+  fi
+}
+
+# Function to fix the JSON format of the config file
+fix_json_format() {
+
+  # Fix the JSON format using jq
+  jq -r '.' "$CONFIG_FILE.bak" > "$CONFIG_FILE"
+  echo "JSON format fixed."
+}
+
+# Menu loop
+while true; do
+  echo "Menu:"
+  echo "1. Add a username"
+  echo "2. Remove a username"
+  echo "3. Change a username"
+  echo "4. Fix JSON format"
+  echo "5. Exit"
+  read -p "Enter your choice: " choice
+
+  case $choice in
+1) add_username ;;
+2) remove_username ;;
+3) change_username ;;
+4) fix_json_format ;;
+5) break ;;
+*) echo "Invalid choice. Please try again." ;;
+esac
+
+echo
+done
